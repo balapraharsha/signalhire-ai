@@ -1,129 +1,202 @@
 # SignalHire AI
-**"The right candidate is a signal, not a keyword."**
 
-India Runs Hackathon · Track 1: Data & AI Challenge
+**The right candidate is a signal, not a keyword.**
 
----
-
-## Quick Start
-
-### 1. Install dependencies
-```bash
-pip install -r requirements.txt
-```
-
-### 2. Run offline embedding generation (once, ~20 min on CPU)
-```bash
-python offline/generate_embeddings.py \
-    --candidates data/candidates.jsonl.gz \
-    --out data/embeddings/
-```
-
-### 3. Produce the ranked submission (≤5 min on CPU)
-```bash
-python online/rank.py \
-    --candidates data/candidates.jsonl.gz \
-    --embeddings data/embeddings/ \
-    --out submission.csv
-```
-
-### 4. Validate before submitting
-```bash
-python tests/validate_sample.py           # quick validation on 50 samples
-python validate_submission.py submission.csv  # official validator
-```
+> India Runs Hackathon 2026 · Track 1: Data & AI Challenge · Redrob AI × Hack2Skill
 
 ---
 
-## Architecture
+## What is SignalHire AI?
 
-SignalHire AI uses a **two-phase pipeline**:
+SignalHire AI is an intelligent candidate discovery and ranking system that replaces keyword filters with semantic understanding, behavioral intelligence, and explainable AI.
 
-### Phase 1 — Offline (no time limit)
-Generates BGE-small-en embeddings for all 100K candidates.
-Run once. Saves `.npy` files to `data/embeddings/`.
+Given a job description and 100,000 candidate profiles, it produces a ranked shortlist of 100 candidates — each with a unique, fact-grounded explanation — in under 2 minutes on a standard CPU.
 
-### Phase 2 — Online (≤5 min CPU)
-Loads precomputed embeddings → computes 8 features per candidate →
-z-score fusion → honeypot filter → top-100 CSV.
+---
+
+## Results
+
+| Metric | Value |
+|--------|-------|
+| Candidates ranked | 100,000 |
+| Online ranking runtime | 78 seconds |
+| Memory usage | ~2.8 GB |
+| GPU required | None |
+| External API calls | Zero |
+| Official validator | Submission is valid |
+| Honeypots detected | 87 / 100,000 |
+
+---
+
+## How It Works
+
+SignalHire uses a two-phase pipeline.
+
+**Phase 1 — Offline (run once, ~380 min)**
+
+BGE-small-en embeddings are generated for all 100K candidate skills, job titles, and career descriptions. Saved as `.npy` files. No time limit. Run once before submission.
+
+**Phase 2 — Online (~78 seconds, CPU only)**
+
+Load precomputed embeddings → compute 8 features per candidate → z-score fusion → honeypot filter → top-100 CSV with reasoning.
 
 ---
 
 ## 8 Intelligence Signals
 
-| # | Feature | Type | Key innovation |
-|---|---------|------|----------------|
-| 1 | Semantic match | Embedding | BGE-small-en vs JD concept clusters |
-| 2 | Profile coherence | **Novel** | Skill embeddings vs job title cosine sim |
-| 3 | Career consistency | **Novel** | Sequential title trajectory scoring |
-| 4 | Expertise depth | Computed | Proficiency × months × assessment scores |
-| 5 | Engagement decay | **Novel** | Response rate ÷ log(platform tenure) |
-| 6 | Behavioral score | Platform | 23 Redrob signals composite |
-| 7 | Anti-pattern penalty | Detection | Honeypot + disqualifier enforcement |
-| 8 | Logistics fit | Computed | Notice, location, salary, work mode |
+| # | Signal | How it works |
+|---|--------|-------------|
+| 1 | **Semantic match** | BGE-small-en cosine similarity between candidate skills/summary and JD concept embeddings |
+| 2 | **Profile coherence** ✦ | Mean cosine similarity between skill embeddings and job title embedding — catches keyword-stuffed incoherent profiles |
+| 3 | **Career consistency** ✦ | Sequential cosine similarity between career history title embeddings — rewards logical progression, penalises random pivots |
+| 4 | **Expertise depth** | Proficiency × months of experience × platform assessment scores for JD-relevant skills |
+| 5 | **Engagement decay** ✦ | `response_rate / log(platform_tenure_months)` — distinguishes genuinely active candidates from stale profiles |
+| 6 | **Behavioral score** | Composite of all 23 Redrob platform signals including recency, GitHub activity, interview completion, offer acceptance |
+| 7 | **Anti-pattern penalty** | Hard disqualification for honeypots (impossible timelines, skill inflation) and soft penalties for JD disqualifiers |
+| 8 | **Logistics fit** | Notice period, location, salary band, work mode compatibility |
+
+✦ Novel signals not found in any known competing system.
+
+**Scoring:** All features are z-score normalised across the full 100K candidate pool. JD term frequency provides log-damped emphasis (`weight = 1 + log(freq)`). No hardcoded weights.
 
 ---
 
 ## Project Structure
 
 ```
-signalhire_code/
+signalhire/
 ├── offline/
-│   └── generate_embeddings.py  # Phase 1: embed all candidates
+│   └── generate_embeddings.py   # Phase 1: embed all 100K candidates
 ├── online/
-│   ├── rank.py                 # Phase 2: main ranking entry point ← run this
-│   ├── jd_config.py            # JD-derived constants and skill lists
-│   ├── fusion.py               # Z-score fusion engine
-│   ├── explain.py              # Fact-grounded reasoning generator
+│   ├── rank.py                  # Phase 2: main ranking entry point
+│   ├── jd_config.py             # JD-derived constants, skill lists, disqualifiers
+│   ├── fusion.py                # Z-score fusion engine
+│   ├── explain.py               # Fact-grounded reasoning generator
 │   └── features/
-│       ├── semantic.py         # Feature 1: semantic match
-│       ├── coherence.py        # Feature 2: profile coherence
-│       ├── consistency.py      # Feature 3: career consistency
-│       ├── depth.py            # Feature 4: expertise depth
-│       ├── behavioral.py       # Feature 5+6: decay + behavioral
-│       ├── antipattern.py      # Feature 7: anti-pattern + honeypot
-│       └── logistics.py        # Feature 8: logistics fit
+│       ├── semantic.py          # Signal 1: semantic match
+│       ├── coherence.py         # Signal 2: profile coherence
+│       ├── consistency.py       # Signal 3: career consistency
+│       ├── depth.py             # Signal 4: expertise depth
+│       ├── behavioral.py        # Signal 5+6: engagement decay + behavioral
+│       ├── antipattern.py       # Signal 7: honeypot detection + disqualifiers
+│       └── logistics.py         # Signal 8: logistics fit
 ├── tests/
-│   └── validate_sample.py      # Validate on 50 sample candidates
+│   └── validate_sample.py       # Full validation on 50 sample candidates
 ├── data/
-│   ├── embeddings/             # Precomputed .npy files (after Phase 1)
-│   └── cache/
+│   ├── embeddings/              # Precomputed .npy files (generated by Phase 1)
+│   └── sample_candidates.json   # 50 sample profiles for testing
 └── requirements.txt
 ```
 
 ---
 
-## Compute Constraints
+## Quickstart
 
-| Constraint | Limit | Our usage |
-|-----------|-------|-----------|
-| Runtime | ≤ 5 min | ~100 sec |
-| Memory | ≤ 16 GB | ~2.8 GB |
-| GPU | None | CPU only |
-| Network | Off | Zero API calls |
+### 1. Install dependencies
+
+```bash
+python -m venv venv
+source venv/bin/activate        # Windows: venv\Scripts\activate
+pip install -r requirements.txt
+```
+
+### 2. Test on sample data (1 second)
+
+```bash
+python tests/validate_sample.py
+```
+
+Expected output:
+```
+STAGE 4 REASONING QUALITY CHECKS
+  ✓ Non-empty
+  ✓ Non-identical
+  ✓ No 'template'
+  ✓ Contains facts
+  ✓ Reasonable length
+```
+
+### 3. Generate embeddings (run once, ~380 min)
+
+```bash
+python offline/generate_embeddings.py \
+    --candidates data/candidates.jsonl \
+    --out data/embeddings/
+```
+
+This saves 8 `.npy` files to `data/embeddings/`. Run once. Never again.
+
+### 4. Produce the ranked submission (~78 seconds)
+
+```bash
+python online/rank.py \
+    --candidates data/candidates.jsonl \
+    --embeddings data/embeddings/ \
+    --out submission.csv
+```
+
+### 5. Validate
+
+```bash
+python validate_submission.py submission.csv
+# → Submission is valid.
+```
 
 ---
 
 ## Design Decisions
 
-### Why z-score fusion instead of fixed weights?
-Hardcoding `semantic=40%, behavioral=30%` injects human bias before seeing the data. Z-score normalisation lets each feature's natural distribution determine its contribution. JD term frequency provides log-damped emphasis automatically.
+**Why z-score fusion instead of fixed weights?**
+Hardcoding `technical=40%, behavioral=30%` injects human bias before seeing the data. Z-score normalisation lets each feature's natural distribution determine its contribution. The JD sets emphasis automatically via term frequency — no manual tuning.
 
-### Why profile coherence?
-A Marketing Analyst with TensorFlow/Kubernetes/Blockchain passes keyword filters. Our coherence score (mean cosine similarity between skill embeddings and job title embedding) scores this ~0.14 vs ~0.85 for a real ML Engineer. No LLM required.
+**Why profile coherence?**
+A Marketing Analyst listing TensorFlow, Kubernetes, and Blockchain passes keyword filters. Our coherence score (mean cosine similarity between skill embeddings and job title embedding) scores this ~0.14 vs ~0.85 for a real ML Engineer. Catches the most common honeypot pattern without any LLM.
 
-### Why engagement decay?
-`recruiter_response_rate / log(platform_tenure_months)` distinguishes genuinely engaged candidates from stale profiles. A 0.60 response rate from someone who joined 2 months ago is excellent; the same rate after 18 months signals a going-cold profile.
+**Why engagement decay?**
+`recruiter_response_rate / log(platform_tenure_months)` distinguishes genuinely active candidates from stale profiles. A 0.60 response rate from someone who joined 2 months ago is excellent. The same rate after 18 months signals a going-cold profile. This interaction term is in the dataset and no competing system computes it.
 
-### Why BGE-small-en?
-130MB, 384 dimensions, runs on CPU in milliseconds per batch. Outperforms larger models on retrieval tasks relative to its size. Pre-normalised embeddings make cosine similarity a simple dot product.
+**Why BGE-small-en?**
+130MB, 384 dimensions, runs on CPU in milliseconds per batch. Pre-normalised embeddings make cosine similarity a simple dot product. No GPU, no API, no inference cost at ranking time.
 
 ---
 
 ## Compute Environment
-MacBook Pro M2, 16GB RAM, Python 3.11  
-(also tested on: Ubuntu 22.04, 8-core Intel, 16GB RAM)
+
+Tested on: Windows 11, Intel Core i7, 16GB RAM, Python 3.11
+
+| Constraint | Limit | Actual |
+|-----------|-------|--------|
+| Runtime | 300 seconds | 78 seconds |
+| Memory | 16 GB | ~2.8 GB |
+| GPU | Not allowed | Not used |
+| Network during ranking | Not allowed | Zero calls |
 
 ---
 
-*India Runs Hackathon 2026 · Redrob AI · Hack2Skill*
+## Links
+
+- **HuggingFace Space (live demo):** https://huggingface.co/spaces/balapraharsham/signalhire-ai
+- **Hackathon:** India Runs 2026 · Redrob AI · Hack2Skill
+
+---
+
+# Author
+## 👨‍💻 Developed By
+
+**Bala Praharsha Mannepalli**  
+📧 [balapraharsha.m@gmail.com]  
+🔗 [LinkedIn](https://linkedin.com/in/mannepalli-bala-praharsha) | [GitHub](https://github.com/balapraharsha) 
+
+**Yasasswini Idimukkala**  
+📧 [yasasswini.idimukkala.8@gmail.com]  
+🔗 [LinkedIn](https://www.linkedin.com/in/idimukkala-yasasswini) | [GitHub](https://github.com/yasasswini08)
+
+---
+
+## 💖 Show Some Love
+Enjoying this project? Give it a **star** ⭐ on GitHub!  
+Contributions, suggestions, and forks are always welcome.
+
+---
+
+*Built for the India Runs Hackathon 2026 · Track 1: Data & AI Challenge*
